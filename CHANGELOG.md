@@ -21,6 +21,8 @@
 - Built the X4 Pro application against its factory-compatible 16 MB A/B
   partition map, while retaining the dedicated recovery target for full-slot
   recovery.
+- Corrected bitmap rendering so the boot/sleep logo and other image assets keep
+  the proper orientation on the portrait X4 Pro display.
 
 ## [1.7.1-rc.2] - 2026-09-05
 

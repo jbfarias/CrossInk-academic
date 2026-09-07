@@ -1804,26 +1804,25 @@ void GfxRenderer::fillRoundedRect(const int x, const int y, const int width, con
 }
 
 void GfxRenderer::drawImage(const uint8_t bitmap[], const int x, const int y, const int width, const int height) const {
-  int rotatedX = 0;
-  int rotatedY = 0;
-  rotateCoordinates(orientation, x, y, &rotatedX, &rotatedY, panelWidth, panelHeight);
-  // Rotate origin corner
-  switch (orientation) {
-    case Portrait:
-      rotatedY = rotatedY - height;
-      break;
-    case PortraitInverted:
-      rotatedX = rotatedX - width;
-      break;
-    case LandscapeClockwise:
-      rotatedY = rotatedY - height;
-      rotatedX = rotatedX - width;
-      break;
-    case LandscapeCounterClockwise:
-      break;
+  // The source bitmap is expressed in logical screen coordinates. The old
+  // implementation transformed only the image origin and then copied the
+  // unrotated rows into the physical framebuffer. That is harmless for a
+  // square, symmetric icon but rotates the boot/sleep logo 90 degrees on the
+  // portrait X4 Pro path. Draw through drawPixel() so the same coordinate
+  // transform used by text, icons, and other primitives is applied to every
+  // source pixel. These images are small (48 or 120 px), so correctness here
+  // is more important than the byte-copy fast path.
+  if (!bitmap || width <= 0 || height <= 0) return;
+
+  const int sourceWidthBytes = (width + 7) / 8;
+  for (int sourceY = 0; sourceY < height; ++sourceY) {
+    const int rowOffset = sourceY * sourceWidthBytes;
+    for (int sourceX = 0; sourceX < width; ++sourceX) {
+      const uint8_t sourceByte = bitmap[rowOffset + (sourceX >> 3)];
+      const bool sourceWhite = (sourceByte & (0x80 >> (sourceX & 7))) != 0;
+      drawPixel(x + sourceX, y + sourceY, !sourceWhite);
+    }
   }
-  // TODO: Rotate bits
-  display.drawImage(bitmap, rotatedX, rotatedY, width, height);
 }
 
 void GfxRenderer::drawImageInverted(const uint8_t bitmap[], const int x, const int y, const int width,

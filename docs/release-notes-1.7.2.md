@@ -28,6 +28,8 @@ device build.
   books.
 - The X4 Pro application target now uses the factory-compatible 16 MB A/B
   partition map, avoiding the smaller X3/X4 app-slot assumptions.
+- Corrected bitmap rendering so the INKademic boot/sleep logo and other image
+  assets are no longer rotated 90 degrees on the portrait X4 Pro display.
 - OTA manifest correction to the canonical repository endpoint:
   `https://api.github.com/repos/jbfarias/INKademic/releases/latest`.
 
@@ -35,9 +37,9 @@ device build.
 
 | Device | File | Size | SHA-256 |
 |---|---|---:|---|
-| X3 / X4 | `firmware-x3-x4-v1.7.2.bin` | 6,221,520 | `d5ab22d04fa4d81b5985a170bd521aeb2c691d74a9a4cf54e5026243e0a31609` |
-| X4 Pro | `firmware-x4-pro-v1.7.2.bin` | 6,126,256 | `9b5237f16b51ebca778f2b72663a26987b3e59ea4f0d4410bf1077d432ac6a50` |
-| Sticky | `firmware-sticky-v1.7.2.bin` | 6,018,272 | `1009d39c56b15612f2ecd36207333f74b567477a4e5ad289b4b356b121f0ff96` |
+| X3 / X4 | `firmware-x3-x4-v1.7.2.bin` | 6,221,136 | `ef472cc7531da5d1da5224f36229f931cdf46eaac05445e4f0eb2ce259473a86` |
+| X4 Pro | `firmware-x4-pro-v1.7.2.bin` | 6,125,824 | `c4c474d2beaa7f0fb3f40a40fa4b24aff51305419ca3a98aae8687b30d8b8273` |
+| Sticky | `firmware-sticky-v1.7.2.bin` | 6,017,824 | `4cca6b50c756f192fa546d2356d7f884274580f5c16ed2b44427651fdf6f0789` |
 | X4 Pro recovery | `firmware-recovery-x4-pro-v1.7.2.bin` | 386,384 | `b4413945b6376f84b3da51069d08f0ca0f26c61dbe63edcc887f1118e0715edf` |
 
 The recovery image is only for the documented X4 Pro factory-compatible
