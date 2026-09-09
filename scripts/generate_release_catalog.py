@@ -31,6 +31,17 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+def require_signature(firmware_path):
+    signature_path = Path(str(firmware_path) + '.sig')
+    if not signature_path.is_file():
+        raise SystemExit(f'Firmware signature not found: {signature_path}')
+    if signature_path.stat().st_size != 64:
+        raise SystemExit(
+            f'Firmware signature must contain exactly 64 bytes: {signature_path}'
+        )
+    return signature_path
+
+
 def utc_now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
 
@@ -101,6 +112,7 @@ def main():
 
         filename = firmware_path.name
         device_type = parse_device_type(firmware_path)
+        signature_path = require_signature(firmware_path)
         supported_devices = args.supported_devices or DEFAULT_SUPPORTED_DEVICES.get(device_type, [])
         firmware_url = f'{firmware_base_url}{filename}'
         firmware_sha256 = sha256_file(firmware_path)
@@ -121,6 +133,9 @@ def main():
                 'firmware_url': firmware_url,
                 'firmware_sha256': firmware_sha256,
                 'size': firmware_size,
+                'firmware_signature_url': f'{firmware_url}.sig',
+                'firmware_signature_sha256': sha256_file(signature_path),
+                'firmware_signature_size': signature_path.stat().st_size,
                 'supported_devices': supported_devices,
             }
         )

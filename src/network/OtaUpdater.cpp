@@ -4,6 +4,9 @@
 bool OtaUpdater::isUpdateNewer() const { return false; }
 const std::string& OtaUpdater::getLatestVersion() const { return latestVersion; }
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() { return NO_UPDATE; }
+OtaUpdater::OtaUpdaterError OtaUpdater::downloadLatestToFiles(const char*, const char*, ProgressCallback, void*) {
+  return NO_UPDATE;
+}
 OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback, void*, std::atomic<bool>*) { return NO_UPDATE; }
 #else
 #include <Arduino.h>
@@ -54,7 +57,7 @@ constexpr size_t OTA_SIGNATURE_SIZE = 64;
 struct ParsedVersion {
   int segments[VERSION_SEGMENT_COUNT] = {0, 0, 0, 0};
   bool valid = false;
-  bool releaseCandidate = false;
+  int qualifier = 0;
   int releaseCandidateNumber = 0;
 };
 
@@ -74,6 +77,10 @@ bool containsRcMarker(const char* version) {
     }
   }
   return false;
+}
+
+bool containsToken(const char* version, const char* token) {
+  return version != nullptr && token != nullptr && strstr(version, token) != nullptr;
 }
 
 int parseReleaseCandidateNumber(const char* version) {
@@ -118,7 +125,13 @@ ParsedVersion parseVersion(const char* version) {
   }
 
   parsed.valid = true;
-  parsed.releaseCandidate = containsRcMarker(version);
+  const bool releaseCandidate = containsRcMarker(version);
+  const bool development = containsToken(version, "-dev") || containsToken(version, "-debug") ||
+                           containsToken(version, "+dev");
+  const bool deviceBuild = containsToken(version, "-x3-x4") || containsToken(version, "-x4-pro") ||
+                           containsToken(version, "-sticky") || containsToken(version, "-recovery-x4-pro");
+  const bool unknownPrerelease = strchr(version, '-') != nullptr && !releaseCandidate && !deviceBuild && !development;
+  parsed.qualifier = releaseCandidate ? 1 : ((development || unknownPrerelease) ? 0 : 2);
   parsed.releaseCandidateNumber = parseReleaseCandidateNumber(version);
   return parsed;
 }
@@ -134,8 +147,8 @@ int compareVersions(const char* latestVersion, const char* currentVersion) {
     }
   }
 
-  if (latest.releaseCandidate != current.releaseCandidate) return current.releaseCandidate ? -1 : 1;
-  if (latest.releaseCandidate && latest.releaseCandidateNumber != current.releaseCandidateNumber) {
+  if (latest.qualifier != current.qualifier) return latest.qualifier > current.qualifier ? 1 : -1;
+  if (latest.qualifier == 1 && latest.releaseCandidateNumber != current.releaseCandidateNumber) {
     return latest.releaseCandidateNumber > current.releaseCandidateNumber ? 1 : -1;
   }
   return 0;
@@ -227,7 +240,14 @@ bool isMatchingFirmwareAssetName(const char* assetName) {
 bool isMatchingSignatureAssetName(const char* assetName) {
   if (assetName == nullptr) return false;
   const std::string expectedName = std::string(firmwareAssetName) + ".sig";
-  return strcmp(assetName, expectedName.c_str()) == 0;
+  if (strcmp(assetName, expectedName.c_str()) == 0) return true;
+
+  // Release workflows publish immutable, versioned names such as
+  // firmware-x4-pro-v1.8.0.bin.sig. Accept only that exact device stem,
+  // with a separating hyphen and the complete .bin.sig suffix.
+  if (!startsWith(assetName, firmwareAssetStem)) return false;
+  if (assetName[strlen(firmwareAssetStem)] != '-') return false;
+  return endsWith(assetName, ".bin.sig");
 }
 
 #if defined(HAVE_ED25519) && defined(HAVE_ED25519_VERIFY) && defined(HAVE_ED25519_KEY_IMPORT)
@@ -409,6 +429,36 @@ bool OtaUpdater::isUpdateNewer() const {
 }
 
 const std::string& OtaUpdater::getLatestVersion() const { return latestVersion; }
+
+OtaUpdater::OtaUpdaterError OtaUpdater::downloadLatestToFiles(const char* imagePath, const char* signaturePath,
+                                                               ProgressCallback onProgress, void* ctx) {
+  if (!isUpdateNewer() || imagePath == nullptr || signaturePath == nullptr) return UPDATE_OLDER_ERROR;
+  if (otaUrl.empty() || otaSignatureUrl.empty() || otaSize == 0) return SIGNATURE_MISSING_ERROR;
+
+  processedSize = 0;
+  totalSize = otaSize;
+  HttpDownloader::DownloadOptions imageOptions(true, true);
+  if (!otaSha256.empty()) imageOptions.transport = HttpDownloader::Transport::WOLFSSL;
+  const auto imageResult = HttpDownloader::downloadToFile(
+      otaUrl, imagePath,
+      [&](const size_t downloaded, const size_t total) {
+        processedSize = downloaded;
+        totalSize = total > 0 ? total : otaSize;
+        if (onProgress) onProgress(ctx);
+      },
+      nullptr, "", "", std::move(imageOptions));
+  if (imageResult != HttpDownloader::OK) {
+    return imageResult == HttpDownloader::ABORTED ? CANCELLED_ERROR : HTTP_ERROR;
+  }
+
+  const auto signatureResult = HttpDownloader::downloadToFile(otaSignatureUrl, signaturePath, nullptr, nullptr);
+  if (signatureResult != HttpDownloader::OK) {
+    return signatureResult == HttpDownloader::ABORTED ? CANCELLED_ERROR : SIGNATURE_MISSING_ERROR;
+  }
+  processedSize = totalSize;
+  if (onProgress) onProgress(ctx);
+  return OK;
+}
 
 OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgress, void* ctx,
                                                       std::atomic<bool>* cancelRequested) {

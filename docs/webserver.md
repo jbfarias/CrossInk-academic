@@ -163,20 +163,27 @@ then explicitly choose **Install and reboot**. The browser shows the staged,
 installing, failed, interrupted, and completed states and reconnects after the
 device restarts.
 
-The device first writes the upload to `/.inkademic-firmware.part`. It checks the
-ESP image header, segment boundaries, chip ID, partition size, XOR checksum, and
-appended SHA-256 before promoting it to `/.inkademic-firmware.bin`. Installation
-then runs in the normal application task, after the HTTP response has returned,
-and reuses the A/B updater with one-sector erase/write windows and watchdog
-servicing. A state marker allows the page to explain what happened after a
-disconnect or reboot.
+The device writes the image to resumable 64 KiB blocks in
+`/.inkademic-firmware.part`. A matching raw 64-byte Ed25519 signature is sent
+separately. Before staging, the firmware checks the ESP image header, segment
+boundaries, chip ID, partition size, XOR checksum, appended SHA-256, embedded
+device identity, version ordering, and the complete-file signature. Only then
+are the image and signature atomically promoted to
+`/.inkademic-firmware.bin` and `/.inkademic-firmware.sig`.
 
-This is a convenience path for a trusted local network; the web server has no
-authentication. It validates image integrity but does not provide Ed25519
-signature verification in this build. For signed release distribution, use the
-documented release/OTA path with a properly signed artifact. The browser page
-is available only in firmware built after this feature was installed, and the
-ordinary `/upload` endpoint remains for books and other SD-card files.
+The page can also query the official GitHub release catalog and ask the device
+to download the matching signed release directly. This uses the same local
+validation path; it never flashes a file merely because it came from the
+catalog. The update is refused when free heap or the largest allocatable block
+is below the safety threshold. The inactive A/B partition is written only
+after a second validation immediately before flashing, and the flash guard
+services the watchdog between sector operations. A compact state and diagnostic
+marker records resumable uploads, the candidate version, the source, and any
+failure. The browser still asks for an explicit reboot confirmation.
+
+This remains a convenience path for a trusted local network; the web server has
+no authentication. The ordinary `/upload` endpoint remains for books and other
+SD-card files.
 
 ## Security Notes
 

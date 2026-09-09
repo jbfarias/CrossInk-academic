@@ -25,6 +25,10 @@ enum class Result {
   BAD_SHA,       // SHA256 trailer mismatch (hash_appended images)
   BAD_CHIP,      // image chip_id doesn't match the running MCU family
   BAD_SIZE,      // body+pad+sha length doesn't match file size
+  BAD_TARGET,    // embedded INKademic device identity does not match this device
+  BAD_VERSION,   // candidate is not newer than the running firmware
+  SIGNATURE_MISSING,
+  SIGNATURE_INVALID,
   NO_PARTITION,
   OOM,
   READ_FAIL,
@@ -58,6 +62,15 @@ Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, boo
 // lookup). Streams the file in CHUNK-sized reads; the file is rewound on
 // success so the caller can immediately reread it for flashing.
 Result validateImageFile(const char* sdPath, size_t partitionSize);
+
+// Validate an image for the browser updater. In addition to the ESP image
+// checks above, this requires the identity marker embedded by the build,
+// rejects cross-device and downgrade images, and verifies the raw Ed25519
+// signature over the file's raw 32-byte SHA-256 digest (the signature is
+// exactly 64 bytes).
+Result validateBrowserImageFile(const char* sdPath, size_t partitionSize, const char* expectedDevice,
+                                const char* currentVersion, const char* signaturePath, char* imageDevice,
+                                size_t imageDeviceCapacity, char* imageVersion, size_t imageVersionCapacity);
 
 const char* resultName(Result r);
 

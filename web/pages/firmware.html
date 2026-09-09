@@ -2,7 +2,8 @@
   <h2>Firmware update</h2>
   <p class="firmware-warning">
     Use only an INKademic image built for this device. The image is uploaded to a temporary SD-card file,
-    validated completely, and only then made eligible for installation.
+    validated completely, and only then made eligible for installation. Release images must include the matching
+    Ed25519 <code>.sig</code> file.
   </p>
 
   <div class="firmware-status" id="firmware-status">Checking device…</div>
@@ -10,7 +11,15 @@
   <div class="firmware-upload">
     <label for="firmware-file">Firmware image (.bin)</label>
     <input id="firmware-file" type="file" accept=".bin,application/octet-stream" />
+    <label for="firmware-signature-file">Release signature (.sig, 64 bytes)</label>
+    <input id="firmware-signature-file" type="file" accept=".sig,application/octet-stream" />
     <button class="save-btn" id="firmware-upload-btn" type="button">Upload and validate</button>
+  </div>
+
+  <div class="firmware-official">
+    <button class="save-btn" id="firmware-check-btn" type="button">Check official signed release</button>
+    <button class="save-btn" id="firmware-download-btn" type="button" disabled>Download official release to device</button>
+    <div id="firmware-official-status"></div>
   </div>
 
   <div class="firmware-progress" id="firmware-progress-wrap" hidden>
@@ -24,7 +33,8 @@
   </div>
 
   <p class="firmware-help">
-    Keep the device powered during installation. A failed or interrupted write leaves the active firmware slot intact.
-    The browser connection will close when the device reboots; reconnect to this page to confirm the result.
+    Interrupted browser uploads resume from the last confirmed block. Keep the device powered during installation.
+    A failed or interrupted write leaves the active firmware slot intact. The browser connection will close when the
+    device reboots; reconnect to this page to confirm the result.
   </p>
 </div>

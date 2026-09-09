@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+class OtaUpdater;
+
 // Structure to hold file information
 struct FileInfo {
   String name;
@@ -95,6 +97,10 @@ class CrossPointWebServer {
   void handleFirmwareStatus() const;
   void handleFirmwareUpload();
   void handleFirmwareUploadPost();
+  void handleFirmwareSignatureUpload();
+  void handleFirmwareSignatureUploadPost();
+  void handleFirmwareCatalog();
+  void handleFirmwareOfficialDownload();
   void handleFirmwareInstall();
   void handleFirmwareCancel();
   void processPendingFirmwareInstall();
@@ -166,30 +172,52 @@ class CrossPointWebServer {
     COMPLETED,
     FAILED,
     INTERRUPTED,
+    AWAITING_SIGNATURE,
   };
 
   struct FirmwareUploadState {
     HalFile file;
     size_t received = 0;
     size_t partitionLimit = 0;
+    size_t total = 0;
     bool active = false;
+    String session;
+    String fileName;
     String error;
   } firmwareUpload;
 
   static constexpr const char* FIRMWARE_TEMP_PATH = "/.inkademic-firmware.part";
   static constexpr const char* FIRMWARE_PATH = "/.inkademic-firmware.bin";
+  static constexpr const char* FIRMWARE_SIGNATURE_TEMP_PATH = "/.inkademic-firmware.sig.part";
+  static constexpr const char* FIRMWARE_SIGNATURE_PATH = "/.inkademic-firmware.sig";
+  static constexpr const char* FIRMWARE_BACKUP_PATH = "/.inkademic-firmware.bak";
   static constexpr const char* FIRMWARE_STATE_PATH = "/.inkademic-firmware.state";
+  static constexpr const char* FIRMWARE_DIAGNOSTIC_PATH = "/.inkademic-firmware.diagnostic";
 
   FirmwareState firmwareState = FirmwareState::IDLE;
+  HalFile firmwareSignatureFile;
+  size_t firmwareSignatureReceived = 0;
+  bool firmwareSignatureActive = false;
   bool firmwareInstallPending = false;
   size_t firmwareSize = 0;
   size_t firmwareWritten = 0;
   size_t firmwareTotal = 0;
+  size_t firmwareUploadTotal = 0;
+  String firmwareCandidateDevice;
+  String firmwareCandidateVersion;
+  String firmwareCandidateSha256;
   String firmwareError;
+  bool firmwareOfficialDownloadPending = false;
+  std::unique_ptr<OtaUpdater> officialUpdater;
 
   static const char* firmwareStateName(FirmwareState state);
   void restoreFirmwareState();
   void writeFirmwareState(const char* state, const char* detail = nullptr) const;
   void resetFirmwareStaging(bool removeReadyImage);
+  bool finalizeFirmwareCandidate(const char* imagePath, const char* signaturePath, size_t imageSize,
+                                 bool fromOfficial);
+  bool hasEnoughHeapForFirmwareUpdate(String& reason) const;
+  void processPendingFirmwareDownload();
   static void firmwareProgress(size_t written, size_t total, void* context);
+  static void officialFirmwareProgress(void* context);
 };

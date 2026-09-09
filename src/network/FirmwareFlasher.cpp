@@ -12,8 +12,14 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <string>
 
 #include "OtaBootSwitch.h"
+#include "OtaUpdatePublicKey.h"
+
+#if defined(HAVE_ED25519) && defined(HAVE_ED25519_VERIFY) && defined(HAVE_ED25519_KEY_IMPORT)
+#include <wolfssl/wolfcrypt/ed25519.h>
+#endif
 
 namespace firmware_flash {
 
@@ -56,6 +62,14 @@ const char* resultName(Result r) {
       return "BAD_CHIP";
     case Result::BAD_SIZE:
       return "BAD_SIZE";
+    case Result::BAD_TARGET:
+      return "BAD_TARGET";
+    case Result::BAD_VERSION:
+      return "BAD_VERSION";
+    case Result::SIGNATURE_MISSING:
+      return "SIGNATURE_MISSING";
+    case Result::SIGNATURE_INVALID:
+      return "SIGNATURE_INVALID";
     case Result::NO_PARTITION:
       return "NO_PARTITION";
     case Result::OOM:
@@ -299,6 +313,218 @@ Result validateImageFile(const char* sdPath, size_t partitionSize) {
 
   mbedtls_sha256_free(&shaCtx);
   file.close();
+  return Result::OK;
+}
+
+namespace {
+constexpr char IDENTITY_PREFIX[] = "INKADEMIC_FW_ID|device=";
+constexpr size_t IDENTITY_SCAN_WINDOW = 256;
+constexpr size_t IDENTITY_DEVICE_MAX = 31;
+constexpr size_t IDENTITY_VERSION_MAX = 63;
+
+bool isDigit(const char c) { return c >= '0' && c <= '9'; }
+
+struct ParsedVersion {
+  int segments[4] = {0, 0, 0, 0};
+  bool valid = false;
+  // 0 = development/unknown pre-release, 1 = release candidate,
+  // 2 = production release. Device suffixes used by local builds are
+  // intentionally treated as production-equivalent.
+  int qualifier = 0;
+  int rcNumber = 0;
+};
+
+bool hasToken(const char* version, const char* token) {
+  if (version == nullptr || token == nullptr) return false;
+  return std::strstr(version, token) != nullptr;
+}
+
+ParsedVersion parseVersion(const char* version) {
+  ParsedVersion parsed;
+  if (version == nullptr || version[0] == '\0') return parsed;
+  const char* p = version;
+  if (*p == 'v' || *p == 'V') ++p;
+  for (size_t i = 0; i < 4; ++i) {
+    if (!isDigit(*p)) return parsed;
+    int value = 0;
+    while (isDigit(*p)) {
+      value = value * 10 + (*p - '0');
+      ++p;
+    }
+    parsed.segments[i] = value;
+    if (*p != '.') break;
+    ++p;
+  }
+  parsed.valid = true;
+  bool hasRc = false;
+  for (const char* marker = version; marker[0] != '\0' && marker[1] != '\0' && marker[2] != '\0'; ++marker) {
+    if (marker[0] == '-' && (marker[1] == 'r' || marker[1] == 'R') &&
+        (marker[2] == 'c' || marker[2] == 'C')) {
+      hasRc = true;
+      marker += 3;
+      if (*marker == '.') ++marker;
+      while (isDigit(*marker)) {
+        parsed.rcNumber = parsed.rcNumber * 10 + (*marker - '0');
+        ++marker;
+      }
+      break;
+    }
+  }
+  const bool isDevelopment = hasToken(version, "-dev") || hasToken(version, "-debug") || hasToken(version, "+dev");
+  const bool isDeviceBuild = hasToken(version, "-x3-x4") || hasToken(version, "-x4-pro") ||
+                             hasToken(version, "-sticky") || hasToken(version, "-recovery-x4-pro");
+  const bool unknownPrerelease = std::strchr(version, '-') != nullptr && !hasRc && !isDeviceBuild && !isDevelopment;
+  parsed.qualifier = hasRc ? 1 : ((isDevelopment || unknownPrerelease) ? 0 : 2);
+  return parsed;
+}
+
+int compareVersions(const char* left, const char* right) {
+  const ParsedVersion a = parseVersion(left);
+  const ParsedVersion b = parseVersion(right);
+  if (!a.valid || !b.valid) return 0;
+  for (size_t i = 0; i < 4; ++i) {
+    if (a.segments[i] != b.segments[i]) return a.segments[i] > b.segments[i] ? 1 : -1;
+  }
+  if (a.qualifier != b.qualifier) return a.qualifier > b.qualifier ? 1 : -1;
+  if (a.qualifier == 1 && a.rcNumber != b.rcNumber) return a.rcNumber > b.rcNumber ? 1 : -1;
+  return 0;
+}
+
+bool copyField(const std::string& source, size_t start, size_t end, char* output, size_t capacity) {
+  if (output == nullptr || capacity == 0 || end < start || end - start + 1 > capacity) return false;
+  const size_t length = end - start;
+  std::memcpy(output, source.data() + start, length);
+  output[length] = '\0';
+  return true;
+}
+
+bool readEmbeddedIdentity(HalFile& file, char* device, size_t deviceCapacity, char* version, size_t versionCapacity) {
+  if (!file.seek(0)) return false;
+  auto buffer = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[CHUNK]);
+  if (!buffer) return false;
+
+  std::string window;
+  window.reserve(IDENTITY_SCAN_WINDOW);
+  size_t remaining = file.fileSize();
+  while (remaining > 0) {
+    const size_t want = std::min<size_t>(CHUNK, remaining);
+    const int got = file.read(buffer.get(), want);
+    if (got <= 0 || static_cast<size_t>(got) != want) return false;
+    for (size_t i = 0; i < want; ++i) {
+      window.push_back(static_cast<char>(buffer[i]));
+      if (window.size() > IDENTITY_SCAN_WINDOW) window.erase(0, window.size() - IDENTITY_SCAN_WINDOW);
+      const size_t marker = window.find(IDENTITY_PREFIX);
+      if (marker == std::string::npos) continue;
+      const size_t deviceStart = marker + sizeof(IDENTITY_PREFIX) - 1;
+      const size_t deviceEnd = window.find("|version=", deviceStart);
+      if (deviceEnd == std::string::npos) continue;
+      const size_t versionStart = deviceEnd + sizeof("|version=") - 1;
+      const size_t versionEnd = window.find('|', versionStart);
+      if (versionEnd == std::string::npos) continue;
+      if (!copyField(window, deviceStart, deviceEnd, device, deviceCapacity) ||
+          !copyField(window, versionStart, versionEnd, version, versionCapacity)) {
+        return false;
+      }
+      return true;
+    }
+    remaining -= want;
+    esp_task_wdt_reset();
+    yield();
+  }
+  return false;
+}
+
+bool computeFileSha256(const char* sdPath, uint8_t digest[32]) {
+  HalFile file;
+  if (!Storage.openFileForRead("FLASH", sdPath, file) || !file) return false;
+  auto buffer = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[CHUNK]);
+  if (!buffer) {
+    file.close();
+    return false;
+  }
+  mbedtls_sha256_context sha;
+  mbedtls_sha256_init(&sha);
+  mbedtls_sha256_starts(&sha, 0);
+  size_t remaining = file.fileSize();
+  while (remaining > 0) {
+    const size_t want = std::min<size_t>(CHUNK, remaining);
+    const int got = file.read(buffer.get(), want);
+    if (got <= 0 || static_cast<size_t>(got) != want) {
+      mbedtls_sha256_free(&sha);
+      file.close();
+      return false;
+    }
+    mbedtls_sha256_update(&sha, buffer.get(), want);
+    remaining -= want;
+    esp_task_wdt_reset();
+    yield();
+  }
+  mbedtls_sha256_finish(&sha, digest);
+  mbedtls_sha256_free(&sha);
+  file.close();
+  return true;
+}
+
+bool verifyEd25519FileSignature(const char* imagePath, const char* signaturePath) {
+  HalFile signature;
+  if (!Storage.openFileForRead("FLASH", signaturePath, signature) || !signature || signature.fileSize() != 64) {
+    if (signature) signature.close();
+    return false;
+  }
+  uint8_t rawSignature[64] = {};
+  const bool signatureRead = signature.read(rawSignature, sizeof(rawSignature)) == static_cast<int>(sizeof(rawSignature));
+  signature.close();
+  if (!signatureRead) return false;
+
+  uint8_t digest[32] = {};
+  if (!computeFileSha256(imagePath, digest)) return false;
+
+#if defined(HAVE_ED25519) && defined(HAVE_ED25519_VERIFY) && defined(HAVE_ED25519_KEY_IMPORT)
+  ed25519_key key;
+  wc_ed25519_init(&key);
+  const int importResult = wc_ed25519_import_public(inkademic_ota::kEd25519PublicKey,
+                                                     sizeof(inkademic_ota::kEd25519PublicKey), &key);
+  int verified = 0;
+  const int verifyResult = importResult == 0 ? wc_ed25519_verify_msg(rawSignature, sizeof(rawSignature), digest,
+                                                                       sizeof(digest), &verified, &key)
+                                             : -1;
+  wc_ed25519_free(&key);
+  return verifyResult == 0 && verified == 1;
+#else
+  (void)digest;
+  return false;
+#endif
+}
+}  // namespace
+
+Result validateBrowserImageFile(const char* sdPath, size_t partitionSize, const char* expectedDevice,
+                                const char* currentVersion, const char* signaturePath, char* imageDevice,
+                                size_t imageDeviceCapacity, char* imageVersion, size_t imageVersionCapacity) {
+  const Result baseResult = validateImageFile(sdPath, partitionSize);
+  if (baseResult != Result::OK) return baseResult;
+
+  HalFile image;
+  if (!Storage.openFileForRead("FLASH", sdPath, image) || !image) return Result::OPEN_FAIL;
+  const bool identityFound = readEmbeddedIdentity(image, imageDevice, imageDeviceCapacity, imageVersion, imageVersionCapacity);
+  image.close();
+  if (!identityFound) {
+    LOG_ERR("FLASH", "browser validation: missing INKademic identity marker");
+    return Result::BAD_TARGET;
+  }
+  if (expectedDevice == nullptr || std::strcmp(imageDevice, expectedDevice) != 0) {
+    LOG_ERR("FLASH", "browser validation: target=%s expected=%s", imageDevice, expectedDevice ? expectedDevice : "none");
+    return Result::BAD_TARGET;
+  }
+  if (currentVersion == nullptr || compareVersions(imageVersion, currentVersion) <= 0) {
+    LOG_ERR("FLASH", "browser validation: candidate=%s current=%s", imageVersion,
+            currentVersion ? currentVersion : "none");
+    return Result::BAD_VERSION;
+  }
+  if (signaturePath == nullptr || !Storage.exists(signaturePath)) return Result::SIGNATURE_MISSING;
+  if (!verifyEd25519FileSignature(sdPath, signaturePath)) {
+    LOG_ERR("FLASH", "browser validation: Ed25519 signature rejected");
+    return Result::SIGNATURE_INVALID;
+  }
   return Result::OK;
 }
 

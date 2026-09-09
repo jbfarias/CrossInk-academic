@@ -73,25 +73,50 @@ Returns the current staging/install state. Example:
 ```json
 {
   "state": "ready",
-  "version": "1.7.2",
+  "version": "1.8.0",
   "device": "x4-pro",
   "received": 6125712,
+  "total": 6125712,
   "size": 6125712,
+  "candidateVersion": "1.8.0",
+  "signatureVerified": true,
   "installSupported": true
 }
 ```
 
 States include `idle`, `uploading`, `ready`, `install_requested`,
-`installing`, `rebooting`, `completed`, `failed`, and `interrupted`.
+`awaiting_signature`, `installing`, `rebooting`, `completed`, `failed`, and
+`interrupted`. The response also includes `session`, `partitionLimit`,
+`signaturePresent`, `candidateDevice`, `freeHeap`, and `maxAllocHeap`.
 
 ### `POST /api/firmware/upload`
 
-Uploads one multipart field named `file`. Only `.bin` files that fit the next
-OTA partition are accepted. The response is returned after the complete file
-has been written and validated. Validation includes the ESP image magic,
-segment table, segment bounds, running-chip ID, partition size, XOR checksum,
-and appended SHA-256 trailer. A successful upload is staged for a separate
-install request.
+Uploads one multipart field named `file`. Resumable requests include the query
+parameters `session`, `offset`, and `total`; each request may contain a block
+of the image. A connection interruption keeps the partial file and the next
+request must continue at the reported `received` offset. Once the complete
+image has passed the ESP integrity checks, the state becomes
+`awaiting_signature`.
+
+The browser then sends the matching raw 64-byte Ed25519 signature in the
+`signature` multipart field to `POST /api/firmware/signature`. The image is
+accepted only when the embedded device identity matches the running target, the
+candidate version is newer, and the signature verifies with the public key
+compiled into INKademic.
+
+### `GET /api/firmware/catalog`
+
+Checks the official `jbfarias/INKademic` latest release catalog using the same
+device-specific asset matcher as the native OTA path. It returns `available`,
+`version`, `size`, `sha256`, `downloadUrl`, `signatureUrl`, and
+`signatureSize` when the catalog is reachable.
+
+### `POST /api/firmware/download`
+
+Queues a direct download of the newer official signed release to the device's
+SD card. The device downloads the `.bin` and `.sig`, then runs the exact same
+identity, version, integrity, and Ed25519 checks as a browser upload before
+making the candidate eligible for installation.
 
 ### `POST /api/firmware/install`
 
@@ -105,8 +130,8 @@ Removes the staged image and returns the state to `idle`. It is rejected once
 installation has started.
 
 The endpoint has no authentication. Use a private network or device hotspot,
-and do not expose port 80 to an untrusted network. This browser flow checks
-integrity, not Ed25519 authenticity; use signed release OTA for that guarantee.
+and do not expose port 80 to an untrusted network. The device refuses unsigned
+or downgraded images, but network access is still intentionally unauthenticated.
 
 ## File Management
 

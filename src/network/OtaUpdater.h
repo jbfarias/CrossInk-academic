@@ -38,10 +38,20 @@ class OtaUpdater {
 
   size_t getTotalSize() const { return totalSize; }
 
+  const std::string& getLatestUrl() const { return otaUrl; }
+  const std::string& getLatestSha256() const { return otaSha256; }
+  const std::string& getLatestSignatureUrl() const { return otaSignatureUrl; }
+  size_t getLatestSignatureSize() const { return otaSignatureSize; }
+
   OtaUpdater() = default;
   bool isUpdateNewer() const;
   const std::string& getLatestVersion() const;
   OtaUpdaterError checkForUpdate();
+  // Download the already checked official release to SD-card files. The
+  // caller still performs the same local image, target, and signature
+  // validation before promoting either file to the install queue.
+  OtaUpdaterError downloadLatestToFiles(const char* imagePath, const char* signaturePath,
+                                        ProgressCallback onProgress = nullptr, void* ctx = nullptr);
   OtaUpdaterError installUpdate(ProgressCallback onProgress = nullptr, void* ctx = nullptr,
                                 std::atomic<bool>* cancelRequested = nullptr);
 };
