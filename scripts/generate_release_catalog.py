@@ -51,6 +51,11 @@ def normalize_version(version):
     return version[1:] if version.startswith('v') else version
 
 
+def infer_channel(version):
+    """Keep prerelease versions out of the stable catalog channel."""
+    return 'rc' if re.search(r'-rc(?:[.-]?\d+)?(?:$|[+.-])', version, re.IGNORECASE) else 'stable'
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Generate INKademic release catalog JSON.')
     parser.add_argument(
@@ -69,7 +74,7 @@ def parse_args():
         help='Base URL for firmware artifacts. Defaults to the versioned GitHub Release download URL.',
     )
     parser.add_argument('--released-at', default=utc_now_iso(), help='Release timestamp in ISO-8601 format.')
-    parser.add_argument('--channel', default='stable', help='Release channel.')
+    parser.add_argument('--channel', default=None, help='Release channel. Inferred as rc for -rc versions.')
     parser.add_argument('--notes', default=None, help='Free-text changelog shown to users.')
     parser.add_argument(
         '--supported-device',
@@ -98,7 +103,8 @@ def sort_key_for_device_type(device_type):
 def main():
     args = parse_args()
     version = normalize_version(args.version)
-    notes = args.notes or f'INKademic {version} {args.channel} firmware'
+    channel = args.channel.strip() if args.channel else infer_channel(version)
+    notes = args.notes or f'INKademic {version} {channel} firmware'
     firmware_base_url = args.firmware_base_url or f'https://github.com/{args.repo}/releases/download/v{version}/'
     firmware_base_url = firmware_base_url.rstrip('/') + '/'
 
@@ -123,8 +129,8 @@ def main():
 
         releases.append(
             {
-                'id': f'{args.channel}-{version}-{device_type}',
-                'channel': args.channel,
+                'id': f'{channel}-{version}-{device_type}',
+                'channel': channel,
                 'name': version,
                 'version': version,
                 'variant': device_type,

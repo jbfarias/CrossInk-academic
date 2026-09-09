@@ -88,7 +88,8 @@ int parseReleaseCandidateNumber(const char* version) {
   for (const char* p = version; p[0] != '\0' && p[1] != '\0' && p[2] != '\0'; ++p) {
     if (p[0] != '-' || (p[1] != 'r' && p[1] != 'R') || (p[2] != 'c' && p[2] != 'C')) continue;
     p += 3;
-    if (*p == '.') ++p;
+    // Accept both common spellings: 1.8.0-rc.2 and 1.8.0-rc-2.
+    if (*p == '.' || *p == '-') ++p;
     int value = 0;
     bool foundDigit = false;
     while (isDigit(*p)) {

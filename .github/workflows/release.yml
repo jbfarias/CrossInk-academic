@@ -141,9 +141,14 @@ jobs:
 
       - name: Generate release catalog
         run: |
+          CHANNEL=stable
+          case "${{ env.RELEASE_VERSION }}" in
+            *-rc*) CHANNEL=rc ;;
+          esac
           python3 scripts/generate_release_catalog.py \
             --version "${{ env.RELEASE_VERSION }}" \
             --repo "${{ github.repository }}" \
+            --channel "$CHANNEL" \
             --firmware "release-firmware/firmware-x3-x4-v${{ env.RELEASE_VERSION }}.bin" \
             --firmware "release-firmware/firmware-sticky-v${{ env.RELEASE_VERSION }}.bin" \
             --firmware "release-firmware/firmware-x4-pro-v${{ env.RELEASE_VERSION }}.bin" \

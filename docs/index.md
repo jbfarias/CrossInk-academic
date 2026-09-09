@@ -28,4 +28,6 @@ Welcome to INKademic, a research-oriented fork of CrossPoint Reader.
 - [Troubleshooting](./troubleshooting.md)
 - [X4 Pro Validation](./x4-pro-validation.md)
 - [Release notes: v1.7.2](./release-notes-1.7.2.md)
+- [Release notes: v1.8.0-rc-2](./release-notes-1.8.0-rc-2.md)
+- [Plan: v1.8.0-rc-2](./plan-1.8.0-rc-2.md)
 - [Fork lineage and references](./fork-lineage.md)

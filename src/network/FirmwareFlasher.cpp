@@ -362,7 +362,8 @@ ParsedVersion parseVersion(const char* version) {
         (marker[2] == 'c' || marker[2] == 'C')) {
       hasRc = true;
       marker += 3;
-      if (*marker == '.') ++marker;
+      // Accept both common spellings: 1.8.0-rc.2 and 1.8.0-rc-2.
+      if (*marker == '.' || *marker == '-') ++marker;
       while (isDigit(*marker)) {
         parsed.rcNumber = parsed.rcNumber * 10 + (*marker - '0');
         ++marker;
